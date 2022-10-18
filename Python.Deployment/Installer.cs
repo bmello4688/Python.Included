@@ -391,67 +391,90 @@ namespace Python.Deployment
 
         public static async Task RunCommand(string command, CancellationToken token)
         {
-            Process process = new Process();
-            try
+            using (Process process = new Process())
             {
-                string args = null;
-                string filename = null;
-                ProcessStartInfo startInfo = new ProcessStartInfo();
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                try
                 {
-                    // Unix/Linux/macOS specific command execution
-                    filename = "/bin/bash";
-                    args = $"-c {command}";
-                }
-                else
-                {
-                    // Windows specific command execution
-                    filename = "cmd.exe";
-                    args = $"/C {command}";
-                }
-                Log($"> {filename} {args}");
-                startInfo = new ProcessStartInfo
-                {
-                    FileName = filename,
-                    WorkingDirectory = EmbeddedPythonHome,
-                    Arguments = args,
-
-                    // If the UseShellExecute property is true, the CreateNoWindow property value is ignored and a new window is created.
-                    // .NET Core does not support creating windows directly on Unix/Linux/macOS and the property is ignored.
-
-                    CreateNoWindow = true,
-                    UseShellExecute = false, // necessary for stdout redirection
-                    RedirectStandardError = true,
-                    RedirectStandardInput = true,
-                    RedirectStandardOutput = true,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                };
-                process.StartInfo = startInfo;
-                process.OutputDataReceived += (x, y) => Log(y.Data);
-                process.ErrorDataReceived += (x, y) => Log(y.Data);
-                process.Start();
-                process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
-                token.Register(() =>
-                {
-                    try
+                    string args = null;
+                    string filename = null;
+                    ProcessStartInfo startInfo = new ProcessStartInfo();
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                     {
-                        if (!process.HasExited)
-                            process.Kill();
+                        // Unix/Linux/macOS specific command execution
+                        filename = "/bin/bash";
+                        args = $"-c {command}";
                     }
-                    catch (Exception) { /* ignore */ }
-                });
-                await Task.Run(() => { process.WaitForExit(); }, token);
-                if (process.ExitCode != 0)
-                    Log(" => exit code " + process.ExitCode);
-            }
-            catch (Exception e)
-            {
-                Log($"RunCommand: Error with command: '{command}'\r\n{e.Message}");
-            }
-            finally
-            {
-                process?.Dispose();
+                    else
+                    {
+                        // Windows specific command execution
+                        filename = "cmd.exe";
+                        args = $"/C {command}";
+                    }
+                    Log($"> {filename} {args}");
+
+                    using (ManualResetEventSlim outputHandler = new ManualResetEventSlim(false))
+                    using (ManualResetEventSlim errorHandler = new ManualResetEventSlim(false))
+                    {
+                        startInfo = new ProcessStartInfo
+                        {
+                            FileName = filename,
+                            WorkingDirectory = EmbeddedPythonHome,
+                            Arguments = args,
+
+                            // If the UseShellExecute property is true, the CreateNoWindow property value is ignored and a new window is created.
+                            // .NET Core does not support creating windows directly on Unix/Linux/macOS and the property is ignored.
+
+                            CreateNoWindow = true,
+                            UseShellExecute = false, // necessary for stdout redirection
+                            RedirectStandardError = true,
+                            RedirectStandardInput = true,
+                            RedirectStandardOutput = true,
+                            WindowStyle = ProcessWindowStyle.Hidden,
+                        };
+
+                        process.StartInfo = startInfo;
+                        process.OutputDataReceived += (sender, e) =>
+                        {
+                            if (e.Data != null)
+                                Log(e.Data);
+                            else
+                                outputHandler.Set();
+                        };
+                        process.ErrorDataReceived += (sender, e) =>
+                        {
+                            if (e.Data != null)
+                                Log(e.Data);
+                            else
+                                errorHandler.Set();
+                        };
+                        process.Start();
+                        process.BeginOutputReadLine();
+                        process.BeginErrorReadLine();
+                        token.Register(() =>
+                        {
+                            try
+                            {
+                                if (!process.HasExited)
+                                    process.Kill();
+                            }
+                            catch (Exception) { /* ignore */ }
+                        });
+
+                        //There is a bug in windows where wait for exit will freeze
+                        //if redirected output and error reporting does not finish
+                        await Task.Run(() => { outputHandler.Wait(); }, token);
+                        await Task.Run(() => { errorHandler.Wait(); }, token);
+
+                        await Task.Run(() => { process.WaitForExit(); }, token);
+                        
+                        if (process.ExitCode != 0)
+                            Log(" => exit code " + process.ExitCode);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Log($"RunCommand: Error with command: '{command}'\r\n{e.Message}");
+                }
             }
         }
 
