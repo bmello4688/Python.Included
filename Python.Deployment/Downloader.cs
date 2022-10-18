@@ -43,34 +43,38 @@ namespace Python.Deployment
             Action<float> progress = null,
             CancellationToken cancellationToken = default)
         {
-            using (var response = await client.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead))
+            //Run on background task otherwise freezes if running in main synchronization context of WPF
+            await Task.Run(async () =>
             {
-                response.EnsureSuccessStatusCode();
-
-                var contentLength = response.Content.Headers.ContentLength;
-
-                using (var download = await response.Content.ReadAsStreamAsync())
+                using (var response = await client.GetAsync(requestUri, HttpCompletionOption.ResponseHeadersRead))
                 {
-                    int bufferSize = 81920;
+                    response.EnsureSuccessStatusCode();
 
-                    if (progress == null || !contentLength.HasValue)
-                    {
-                        await download.CopyToAsync(destination, bufferSize, cancellationToken);
-                        return;
-                    }
+                    var contentLength = response.Content.Headers.ContentLength;
 
-                    var buffer = new byte[bufferSize];
-                    long totalBytesRead = 0;
-                    int bytesRead;
-                    while ((bytesRead = await download.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) != 0)
+                    using (var download = await response.Content.ReadAsStreamAsync())
                     {
-                        await destination.WriteAsync(buffer, 0, bytesRead, cancellationToken);
-                        totalBytesRead += bytesRead;
-                        var progressPercentage = ((float)totalBytesRead / contentLength.Value) * 100;
-                        progress.Invoke(progressPercentage);
+                        int bufferSize = 81920;
+
+                        if (progress == null || !contentLength.HasValue)
+                        {
+                            await download.CopyToAsync(destination, bufferSize, cancellationToken);
+                            return;
+                        }
+
+                        var buffer = new byte[bufferSize];
+                        long totalBytesRead = 0;
+                        int bytesRead;
+                        while ((bytesRead = await download.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) != 0)
+                        {
+                            await destination.WriteAsync(buffer, 0, bytesRead, cancellationToken);
+                            totalBytesRead += bytesRead;
+                            var progressPercentage = ((float)totalBytesRead / contentLength.Value) * 100;
+                            progress.Invoke(progressPercentage);
+                        }
                     }
                 }
-            }
+            }, cancellationToken);
         }
     }
 }
