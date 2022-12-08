@@ -36,10 +36,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="pythonnet" Version="3.0.0-preview2022-04-11" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <ProjectReference Include="..\..\pythonnet\src\runtime\Python.Runtime.csproj" />
     <ProjectReference Include="..\Python.Deployment\Python.Deployment.csproj" />
   </ItemGroup>
 
