@@ -22,10 +22,6 @@ SOFTWARE.
 
  */
 
-using System;
-using System.Collections.Generic;
-using System.Text;
-
 namespace Python.Included
 {
     public static class PythonEnv
